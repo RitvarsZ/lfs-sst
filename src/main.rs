@@ -171,7 +171,7 @@ fn main() -> Result<()> {
                             input_frames_next = resampler.input_frames_next();
                         }
 
-                        dump_buffer_to_wav(&outdata)?;
+                        // dump_buffer_to_wav(&outdata)?;
                         println!("🛑 Sending for transcription...");
                         audio_tx.send(outdata).unwrap();
                         is_recording = false;
