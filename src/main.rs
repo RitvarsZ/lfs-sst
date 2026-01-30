@@ -6,7 +6,22 @@ use rubato::{Fft, Resampler};
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::Duration;
-use whisper_rs::{WhisperContext, WhisperContextParameters, FullParams, SamplingStrategy};
+use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters, convert_stereo_to_mono_audio};
+
+fn dump_buffer_to_wav(samples: &[f32]) -> Result<()> {
+    let spec = hound::WavSpec {
+        channels: 1,
+        sample_rate: 16_000,
+        bits_per_sample: 32,
+        sample_format: hound::SampleFormat::Float,
+    };
+    let mut writer = hound::WavWriter::create("debug.wav", spec)?;
+    for &sample in samples {
+        writer.write_sample(sample)?;
+    }
+    writer.finalize()?;
+    Ok(())
+}
 
 fn main() -> Result<()> {
     println!("🎮 Press SPACE to toggle recording. Press ESC to quit.");
@@ -16,7 +31,7 @@ fn main() -> Result<()> {
     // -----------------------------
     let mut params = WhisperContextParameters::new();
     params.use_gpu(true); // tiny/small models are fast on CPU
-    params.gpu_device(1);
+    params.gpu_device(0);
     let ctx = Arc::new(WhisperContext::new_with_params("models/medium.en.bin", params)?);
 
     // -----------------------------
@@ -121,9 +136,10 @@ fn main() -> Result<()> {
                         println!("Converting input to 16k mono");
                         *recording.lock().unwrap() = false;
                         let raw_samples = audio_data.lock().unwrap().clone();
-                        let nbr_input_frames = raw_samples.len();
-                        let input_adapter = InterleavedSlice::new(&raw_samples, 1, nbr_input_frames).unwrap();
+                        let mono = convert_stereo_to_mono_audio(&raw_samples).expect("should be no half samples missing");
 
+                        let nbr_input_frames = mono.len();
+                        let input_adapter = InterleavedSlice::new(&mono, 1, nbr_input_frames).unwrap();
                         let mut outdata = vec![0.0; nbr_input_frames * 16_000 / sample_rate + 256];
                         let nbr_out_frames = outdata.len();
                         println!("nbr_input_frames: {}, out_frames: {}, input_channels: {}", nbr_input_frames, nbr_out_frames, input_channels);
@@ -155,6 +171,7 @@ fn main() -> Result<()> {
                             input_frames_next = resampler.input_frames_next();
                         }
 
+                        dump_buffer_to_wav(&outdata)?;
                         println!("🛑 Sending for transcription...");
                         audio_tx.send(outdata).unwrap();
                         is_recording = false;
