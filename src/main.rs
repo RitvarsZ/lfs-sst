@@ -1,8 +1,6 @@
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use std::{sync::mpsc, time::Duration};
 
-use crate::{audio_input::AudioStreamContext, stt::start_stt_worker};
-
 mod stt;
 mod audio_input;
 mod resampler;
@@ -19,7 +17,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // From resampler to stt
     let (resampled_sender, resampled_receiver) = mpsc::channel::<Vec<f32>>();
 
-    let mut audio_capture = AudioStreamContext::init_audio_capture(audio_sender)?;
+    let mut audio_capture = audio_input::AudioStreamContext::new(audio_sender)?;
     resampler::init_resampler(
         audio_receiver,
         resampled_sender,
@@ -27,7 +25,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         audio_capture.input_channels
     );
     let stt_ctx = stt::SttContext::new();
-    start_stt_worker(&stt_ctx, resampled_receiver);
+    stt::start_stt_worker(&stt_ctx, resampled_receiver);
 
     let mut is_recording = false;
 

@@ -8,18 +8,13 @@ pub struct AudioStreamContext {
 }
 
 impl AudioStreamContext {
-    fn new(input_channels: usize, sample_rate: usize, stream: cpal::Stream) -> Self {
-        Self {
-            input_channels,
-            sample_rate,
-            stream,
-        }
-    }
-
-    pub fn init_audio_capture(audio_out: Sender<Vec<f32>>) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn new(audio_out: Sender<Vec<f32>>) -> Result<Self, Box<dyn std::error::Error>> {
         let host = cpal::default_host();
         let device = host.default_input_device().expect("No input device");
-        let input_config = device.default_input_config()?;
+        let input_config = match device.default_input_config() {
+            Ok(config) => config,
+            Err(e) => return Err(format!("Failed to get default input config: {}", e).into()),
+        };
         let input_channels = input_config.channels() as usize;
         println!("Using input device: {}", device.description()?);
         if (input_channels != 1) && (input_channels != 2) {
@@ -37,9 +32,13 @@ impl AudioStreamContext {
         )?;
 
         stream.pause()?;
-        Ok(Self::new(input_channels, sample_rate, stream))
-    }
 
+        Ok(Self {
+            input_channels,
+            sample_rate,
+            stream,
+        })
+    }
 
     pub fn pause_stream(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         match self.stream.pause() {
