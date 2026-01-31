@@ -9,7 +9,7 @@ pub struct AudioStreamContext {
     pub input_channels: usize,
     pub sample_rate: usize,
     pub resampler: rubato::Fft<f32>,
-    _stream: cpal::Stream,
+    stream: cpal::Stream,
 }
 
 impl AudioStreamContext {
@@ -17,7 +17,7 @@ impl AudioStreamContext {
         Self {
             input_channels,
             sample_rate,
-            _stream: stream,
+            stream,
             resampler,
         }
     }
@@ -27,6 +27,7 @@ impl AudioStreamContext {
         let device = host.default_input_device().expect("No input device");
         let input_config = device.default_input_config()?;
         let input_channels = input_config.channels() as usize;
+        println!("Using input device: {}", device.description()?);
         if (input_channels != 1) && (input_channels != 2) {
             return Err(format!("Unsupported number of input channels: {}. Only mono and stereo are supported.", input_channels).into());
         }
@@ -54,7 +55,7 @@ impl AudioStreamContext {
             None,
         )?;
 
-        stream.play()?;
+        stream.pause()?;
         Ok(Self::new(input_channels, sample_rate, stream, resampler))
     }
 
@@ -102,5 +103,18 @@ impl AudioStreamContext {
         Ok(outdata)
     }
 
+    pub fn pause_stream(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        match self.stream.pause() {
+            Ok(()) => Ok(()),
+            Err(e) => Err(format!("Failed to pause audio stream: {}", e).into()),
+        }
+    }
+
+    pub fn start_stream(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        match self.stream.play() {
+            Ok(()) => Ok(()),
+            Err(e) => Err(format!("Failed to start audio stream: {}", e).into()),
+        }
+    }
 }
 

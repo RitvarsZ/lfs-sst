@@ -40,13 +40,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 KeyCode::Char(' ') => {
                     if !is_recording {
                         println!("🎤 Recording...");
+                        audio_capture.start_stream()?;
                         stt_ctx.audio_data.lock().unwrap().clear();
                         *stt_ctx.recording.lock().unwrap() = true;
                         is_recording = true;
                     } else {
                         println!("🛑 Sending for transcription...");
+                        audio_capture.pause_stream()?;
                         *stt_ctx.recording.lock().unwrap() = false;
-                        let raw_samples = stt_ctx.audio_data.lock().unwrap().clone();
+                        let raw_samples = std::mem::take(&mut *stt_ctx.audio_data.lock().expect("Failed to lock audio_data"));
                         let outdata = audio_capture.resample_to_16k_mono(&raw_samples)?;
                         maybe_dump_buffer_to_wav(&outdata)?;
                         stt_ctx.audio_tx.send(outdata).unwrap();
