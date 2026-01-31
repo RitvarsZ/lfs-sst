@@ -10,7 +10,7 @@ mod stt;
 
 pub const DEBUG_AUDIO_RESAMPLING: bool = false;
 pub const USE_GPU: bool = true;
-pub const MODEL_PATH: &str = "models/medium.en.bin";
+pub const MODEL_PATH: &str = "models/small.en.bin";
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("🎮 Press SPACE to toggle recording. Press ESC to quit.");
