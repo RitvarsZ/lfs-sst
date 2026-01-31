@@ -2,6 +2,9 @@
 
 # This script downloads Whisper model files that have already been converted to ggml format.
 # This way you don't have to convert them yourself.
+#
+# On Windows, just use this link:
+# https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.en.bin
 
 #src="https://ggml.ggerganov.com"
 #pfx="ggml-model-whisper"
