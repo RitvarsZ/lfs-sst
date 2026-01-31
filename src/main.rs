@@ -1,28 +1,43 @@
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
-use std::time::Duration;
+use std::{sync::mpsc, time::Duration};
 
-use crate::{stt::maybe_dump_buffer_to_wav};
+use crate::{audio_input::AudioStreamContext, stt::start_stt_worker};
+
 mod stt;
 mod audio_input;
+mod resampler;
 
-pub const DEBUG_AUDIO_RESAMPLING: bool = false;
+pub const DEBUG_AUDIO_RESAMPLING: bool = true;
 pub const USE_GPU: bool = true;
 pub const MODEL_PATH: &str = "models/small.en.bin";
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("🎮 Press SPACE to toggle recording. Press ESC to quit.");
 
-    // 1 Setup speech-to-text
-    let stt_ctx = stt::SttContext::init_stt();
-    // 2 Setup audio capture and resampler.
-    let mut audio_capture = audio_input::AudioStreamContext::init_audio_capture(&stt_ctx)?;
-    // 3 Push-to-talk toggle loop
+    // From input to resampler
+    let (audio_sender, audio_receiver) = mpsc::channel::<Vec<f32>>();
+    // From resampler to stt
+    let (resampled_sender, resampled_receiver) = mpsc::channel::<Vec<f32>>();
+
+    let mut audio_capture = AudioStreamContext::init_audio_capture(audio_sender)?;
+    let dbg = resampler::init_resampler(
+        audio_receiver,
+        resampled_sender,
+        audio_capture.sample_rate,
+        audio_capture.input_channels
+    );
+    let stt_ctx = stt::SttContext::new();
+    start_stt_worker(&stt_ctx, resampled_receiver);
+
     let mut is_recording = false;
 
     loop {
-        // 4 Read logs from STT thread
         while let Ok(msg) = stt_ctx.log_rx.try_recv() {
             println!("{}", msg);
+        }
+        while let Ok(samples) = dbg.try_recv() {
+            let str = samples.iter().map(|s| format!("{:.2}", s)).collect::<Vec<String>>().join(", ");
+            println!("Audio Chunk: [{}]", str);
         }
 
         // Poll keys
@@ -41,18 +56,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     if !is_recording {
                         println!("🎤 Recording...");
                         audio_capture.start_stream()?;
-                        stt_ctx.audio_data.lock().unwrap().clear();
-                        *stt_ctx.recording.lock().unwrap() = true;
+                        *stt_ctx.is_recording.lock().unwrap() = true;
                         is_recording = true;
                     } else {
                         println!("🛑 Sending for transcription...");
-                        audio_capture.pause_stream()?;
-                        *stt_ctx.recording.lock().unwrap() = false;
-                        let raw_samples = std::mem::take(&mut *stt_ctx.audio_data.lock().expect("Failed to lock audio_data"));
-                        let outdata = audio_capture.resample_to_16k_mono(&raw_samples)?;
-                        maybe_dump_buffer_to_wav(&outdata)?;
-                        stt_ctx.audio_tx.send(outdata).unwrap();
+                        *stt_ctx.is_recording.lock().unwrap() = false;
                         is_recording = false;
+                        audio_capture.pause_stream()?;
                     }
                 }
                 _ => {}

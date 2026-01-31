@@ -1,4 +1,4 @@
-use std::{fmt::Display, sync::{Arc, Mutex, mpsc}, thread};
+use std::{fmt::Display, sync::{Arc, Mutex, mpsc::{self, Receiver}}, thread::{self}};
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
 use crate::DEBUG_AUDIO_RESAMPLING;
@@ -33,99 +33,102 @@ impl SttThreadMessage {
 }
 
 pub struct SttContext {
-    pub audio_data: Arc<Mutex<Vec<f32>>>,
-    pub recording: Arc<Mutex<bool>>,
-    pub audio_tx: mpsc::Sender<Vec<f32>>,
+    pub is_recording: Arc<Mutex<bool>>,
     pub log_rx: mpsc::Receiver<SttThreadMessage>,
+    log_tx: mpsc::Sender<SttThreadMessage>,
 }
 
 impl SttContext {
-    fn new(
-        audio_data: Arc<Mutex<Vec<f32>>>,
-        recording: Arc<Mutex<bool>>,
-        audio_tx: mpsc::Sender<Vec<f32>>,
-        log_rx: mpsc::Receiver<SttThreadMessage>,
-    ) -> Self {
+    pub fn new() -> Self {
+        let is_recording = Arc::new(Mutex::new(false));
+        let (log_tx, log_rx) = mpsc::channel::<SttThreadMessage>(); // logs + transcription to main thread
+
         Self {
-            audio_data,
-            recording,
-            audio_tx,
+            is_recording,
+            log_tx,
             log_rx,
         }
     }
+}
 
-    pub fn init_stt() -> Self {
-        // 1️⃣ Setup Whisper
+pub fn start_stt_worker(
+    ctx: &SttContext,
+    audio_in: Receiver<Vec<f32>>
+) {
+    let log_tx = ctx.log_tx.clone();
+    let is_recording = ctx.is_recording.clone();
+
+    thread::spawn(move || {
         let mut params = WhisperContextParameters::new();
         params.use_gpu(USE_GPU);
-        let ctx = Arc::new(
-            WhisperContext::new_with_params(MODEL_PATH, params)
-                .expect("Failed to create Whisper context")
+        let whisper_ctx = WhisperContext::new_with_params(MODEL_PATH, params)
+                .expect("Failed to create Whisper context");
+        let mut whisper_state = whisper_ctx.create_state().unwrap();
+        let mut audio_buffer = Vec::<f32>::new();
+        let mut full_params = FullParams::new(SamplingStrategy::Greedy { best_of: 8 });
+        full_params.set_language(Some("en"));
+        full_params.set_print_special(false);
+        full_params.set_print_progress(false);
+        full_params.set_print_realtime(false);
+        full_params.set_print_timestamps(false);
+
+        let _ = log_tx.send(
+            SttThreadMessage::new(
+                SttThreadMessageType::Log,
+                "✅ STT thread started".into()
+            )
         );
 
-        // 2️⃣ Shared audio buffer and recording flag
-        let audio_data = Arc::new(Mutex::new(Vec::<f32>::new()));
-        let recording = Arc::new(Mutex::new(false));
 
-        // 3️⃣ Channels
-        let (audio_tx, audio_rx) = mpsc::channel::<Vec<f32>>(); // audio buffers to STT thread
-        let (log_tx, log_rx) = mpsc::channel::<SttThreadMessage>(); // logs + transcription to main thread
+        loop {
+            let is_recording = {
+                let rec_lock = is_recording.lock().unwrap();
+                *rec_lock
+            };
 
-        // STT thread
-        let ctx_clone = ctx.clone();
-        thread::spawn(move || {
-            let mut state = ctx_clone.create_state().unwrap();
+            // While recording, dump samples into buffer.
+            if is_recording {
+                while let Ok(samples) = audio_in.try_recv() {
+                    audio_buffer.extend_from_slice(&samples);
+                }
+
+                continue;
+            }
+
+            // When not recording and have samples, transcribe and clear the buffer.
+            if audio_buffer.is_empty() {
+                continue;
+            }
+
+            let _ = maybe_dump_buffer_to_wav(&audio_buffer);
+            if let Err(err) = whisper_state.full(full_params.clone(), &audio_buffer) {
+                let _ = log_tx.send(
+                    SttThreadMessage::new(
+                        SttThreadMessageType::TranscriptionError,
+                        format!("❌ Transcription error: {:?}", err)
+                    )
+                );
+                continue;
+            }
+
+            let mut text = String::new();
+            let n_segments = whisper_state.full_n_segments();
+            for i in 0..n_segments {
+                if let Some(segment) = whisper_state.get_segment(i) && let Ok(segment) = segment.to_str() {
+                    text.push_str(segment);
+                }
+            }
+
             let _ = log_tx.send(
                 SttThreadMessage::new(
-                    SttThreadMessageType::Log,
-                    "✅ STT thread started".into()
+                    SttThreadMessageType::TranscriptionResult,
+                    text.trim().to_string()
                 )
             );
 
-            let mut full_params = FullParams::new(SamplingStrategy::Greedy { best_of: 8 });
-            full_params.set_language(Some("en"));
-            full_params.set_print_special(false);
-            full_params.set_print_progress(false);
-            full_params.set_print_realtime(false);
-            full_params.set_print_timestamps(false);
-
-            while let Ok(samples) = audio_rx.recv() {
-                // log_tx.send(format!("📦 Received {} samples for transcription", samples.len())).unwrap();
-                let _ = log_tx.send(
-                    SttThreadMessage::new(
-                        SttThreadMessageType::Log,
-                        format!("📦 Received {} samples for transcription", samples.len())
-                    )
-                );
-
-                if let Err(err) = state.full(full_params.clone(), &samples) {
-                    let _ = log_tx.send(
-                        SttThreadMessage::new(
-                            SttThreadMessageType::TranscriptionError,
-                            format!("❌ Transcription error: {:?}", err)
-                        )
-                    );
-                    continue;
-                }
-
-                let mut text = String::new();
-                let n_segments = state.full_n_segments();
-                for i in 0..n_segments {
-                    if let Some(segment) = state.get_segment(i) && let Ok(segment) = segment.to_str() {
-                        text.push_str(segment);
-                    }
-                }
-
-                let _ = log_tx.send(
-                    SttThreadMessage::new(
-                        SttThreadMessageType::TranscriptionResult,
-                        text.trim().to_string()
-                    )
-                );
-            }
-        });
-        Self::new(audio_data, recording, audio_tx, log_rx)
-    }
+            audio_buffer.clear();
+        }
+    });
 }
 
 pub fn maybe_dump_buffer_to_wav(samples: &[f32]) -> Result<(), Box<dyn std::error::Error>> {
