@@ -1,27 +1,42 @@
-use std::{sync::mpsc::{Receiver, Sender}, thread};
-
-use audioadapter_buffers::direct::InterleavedSlice;
-use rubato::{Resampler};
+use rubato::{
+    Async, FixedAsync,
+    SincInterpolationParameters, SincInterpolationType, WindowFunction,
+    Resampler,
+};
 use whisper_rs::convert_stereo_to_mono_audio;
+use std::sync::mpsc::{Receiver, Sender};
 
-/**
-* receive audio from mic on channel.
-* resample to 16k mono.
-* send to stt for transcription.
-*/
 pub fn init_resampler(
     audio_in: Receiver<Vec<f32>>,
     audio_out: Sender<Vec<f32>>,
     sample_rate: usize,
     input_channels: usize,
-) -> Receiver<Vec<f32>> {
-    let (tx, rx) = std::sync::mpsc::channel::<Vec<f32>>();
+) -> Receiver<String> {
+    let (tx, rx) = std::sync::mpsc::channel::<String>();
+    let mut input_accum: Vec<f32> = Vec::new();
 
-    thread::spawn(move || {
-        let mut resampler = match rubato::Fft::<f32>::new(sample_rate, 16_000, 1024, 2, 1, rubato::FixedSync::Both) {
-            Ok(r) => r,
-            Err(e) => panic!("Failed to create resampler: {}", e),
+    std::thread::spawn(move || {
+        let sinc_params = SincInterpolationParameters {
+            sinc_len: 128,
+            f_cutoff: 0.95,
+            interpolation: SincInterpolationType::Linear,
+            oversampling_factor: 256,
+            window: WindowFunction::BlackmanHarris2,
         };
+
+        let ratio = 16_000.0 / sample_rate as f64;
+        let chunk_size = 1024;
+        let mut resampler = Async::<f32>::new_sinc(
+            ratio,
+            1.0, // no dynamic ratio range
+            &sinc_params,
+            chunk_size,
+            1, // nbr_channels
+            FixedAsync::Input,
+        )
+        .expect("Failed to create async resampler");
+
+        tx.send(format!("Resampler ratio {} channels {}", ratio, input_channels)).unwrap();
 
         while let Ok(samples) = audio_in.recv() {
             let mono = match input_channels {
@@ -30,41 +45,27 @@ pub fn init_resampler(
                 _ => panic!("Unsupported number of input channels: {}", input_channels),
             };
 
-            let nbr_input_frames = mono.len();
-            let input_adapter = InterleavedSlice::new(&mono, 1, nbr_input_frames).unwrap();
-            let mut outdata = vec![0.0; nbr_input_frames * 16_000 / sample_rate + 256];
-            let nbr_out_frames = outdata.len();
-            let mut output_adapter = InterleavedSlice::new_mut(&mut outdata, 1, nbr_out_frames).unwrap();
-
-            let mut indexing = rubato::Indexing {
-                input_offset: 0,
-                output_offset: 0,
-                active_channels_mask: None,
-                partial_len: None,
-            };
-            let mut input_frames_left = nbr_input_frames;
-            let mut input_frames_next = resampler.input_frames_next();
-
-            // Loop over all full chunks.
-            // There will be some unprocessed input frames left after the last full chunk.
-            // see the `process_f64` example for how to handle those
-            // using `partial_len` of the indexing struct.
-            // It is also possible to use the `process_all_into_buffer` method
-            // to process the entire file (including any last partial chunk) with a single call.
-            while input_frames_left >= input_frames_next {
-                let (frames_read, frames_written) = resampler
-                    .process_into_buffer(&input_adapter, &mut output_adapter, Some(&indexing))
-                    .unwrap();
-
-                indexing.input_offset += frames_read;
-                indexing.output_offset += frames_written;
-                input_frames_left -= frames_read;
-                input_frames_next = resampler.input_frames_next();
+            input_accum.extend_from_slice(&mono);
+            if input_accum.len() < 1024 {
+                continue;
             }
 
-            let _ = tx.send(outdata.clone());
+            let mono: Vec<f32> = input_accum.drain(..1024).collect();
 
-            audio_out.send(outdata).expect("Failed to send resampled audio");
+            // prep output adapters (same shape, but resized to max)
+            let mut out = vec![0.0; resampler.output_frames_max()];
+
+            // process into buffer
+            let (_, out_frames) = resampler
+                .process_into_buffer(
+                    &audioadapter_buffers::direct::InterleavedSlice::new(&mono, 1, mono.len()).unwrap(),
+                    &mut audioadapter_buffers::direct::InterleavedSlice::new_mut(&mut out, 1, resampler.output_frames_max()).unwrap(),
+                    None,
+                )
+                .unwrap();
+
+            out.truncate(out_frames);
+            audio_out.send(out).unwrap();
         }
     });
 

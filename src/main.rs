@@ -35,9 +35,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         while let Ok(msg) = stt_ctx.log_rx.try_recv() {
             println!("{}", msg);
         }
-        while let Ok(samples) = dbg.try_recv() {
-            let str = samples.iter().map(|s| format!("{:.2}", s)).collect::<Vec<String>>().join(", ");
-            println!("Audio Chunk: [{}]", str);
+        while let Ok(msg) = dbg.try_recv() {
+            println!("debug: {}", msg);
         }
 
         // Poll keys
