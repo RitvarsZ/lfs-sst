@@ -17,11 +17,11 @@ pub enum UiEvent {
 pub const STATE_ID: u8 = 1;
 pub const PREVIEW_ID: u8 = 2;
 
-pub const UI_SCALE: u8 = 4;
+pub const UI_SCALE: u8 = 5;
 
-pub const STATE_OFFSET_LEFT: u8 = 4;
+pub const STATE_OFFSET_LEFT: u8 = 10;
 pub const PREVIEW_OFFSET_LEFT: u8 = STATE_OFFSET_LEFT + UI_SCALE;
-pub const PREVIEW_OFFEST_TOP: u8 = 185; // from 0 to 200
+pub const PREVIEW_OFFEST_TOP: u8 = 170; // from 0 to 200
 
 pub async fn dispatch_ui_events(
     tx: tokio::sync::mpsc::Sender<insim::Packet>,
@@ -82,7 +82,7 @@ fn get_state_btn(state: UiState) -> insim::insim::Btn {
 // depending on charaters used, width may vary
 fn msg_to_btn_width(message: String) -> u8 {
     let len = message.len();
-    let width = (len as f32 * 0.75).ceil() as u8;
+    let width = (len as f32 * 0.75).ceil() as u8 + UI_SCALE;
     width.clamp(5, 200)
 }
 
