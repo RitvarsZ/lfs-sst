@@ -1,9 +1,9 @@
 use std::{sync::mpsc};
 
-use crate::{insim_input::InsimCommand, ui::{UiEvent, UiState, dispatch_ui_events}};
+use crate::{insim_io::{InsimEvent}, ui::{UiEvent, UiState, dispatch_ui_events}};
 
 mod audio_input;
-mod insim_input;
+mod insim_io;
 mod resampler;
 mod stt;
 mod ui;
@@ -16,39 +16,37 @@ pub const INSIM_PORT: &str = "29999";
 pub const MESSAGE_PREVIEW_TIMEOUT_SECS: u64 = 20;
 pub const MAX_MESSAGE_LEN: usize = 95;
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut conn = insim::tcp(format!("{}:{}", INSIM_HOST, INSIM_PORT)).connect_blocking()?;
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // From input to resampler
     // From resampler to stt
-    let (audio_sender, audio_receiver) = mpsc::channel::<Vec<f32>>();
-    let (resampled_sender, resampled_receiver) = mpsc::channel::<Vec<f32>>();
-    let (insim_sender, insim_receiver) = mpsc::channel::<InsimCommand>();
+    let (audio_tx, audio_rx) = mpsc::channel::<Vec<f32>>();
+    let (resampled_tx, resampled_rx) = mpsc::channel::<Vec<f32>>();
+    let (insim_event_tx, mut insim_event_rx) = tokio::sync::mpsc::channel::<InsimEvent>(1);
+    let (insim_cmd_tx, insim_cmd_rx) = tokio::sync::mpsc::channel::<insim::Packet>(1);
 
-    insim_input::init_message_reader(insim_sender);
+    insim_io::init_message_io(insim_event_tx, insim_cmd_rx);
 
-    let mut audio_capture = audio_input::AudioStreamContext::new(audio_sender)?;
+    let mut audio_capture = audio_input::AudioStreamContext::new(audio_tx)?;
     resampler::init_resampler(
-        audio_receiver,
-        resampled_sender,
+        audio_rx,
+        resampled_tx,
         audio_capture.sample_rate,
         audio_capture.input_channels
     );
     let stt_ctx = stt::SttContext::new();
-    stt::start_stt_worker(&stt_ctx, resampled_receiver);
+    stt::start_stt_worker(&stt_ctx, resampled_rx);
 
-    let mut ui_state: UiState = UiState::Idle;
+    let mut ui_state: UiState = UiState::Stopped;
     let mut message = String::from("");
     let mut message_timeout: Option<std::time::Instant> = None;
-    let mut ui_update_queue: Vec<ui::UiEvent> = vec![
-        UiEvent::UpdatePreview(message.clone()),
-        UiEvent::UpdateState(ui_state),
-    ];
+    let mut ui_update_queue: Vec<ui::UiEvent> = vec![];
 
     loop {
         if !ui_update_queue.is_empty() {
-            println!("{:?}", ui_update_queue);
+            println!("Dispatching {} UI events", ui_update_queue.len());
+            dispatch_ui_events(insim_cmd_tx.clone(), &mut ui_update_queue).await;
         }
-        dispatch_ui_events(&mut conn, &mut ui_update_queue);
         // Check for message preview timeout and clear message if reached.
         if let Some(timeout) = message_timeout && std::time::Instant::now() >= timeout{
             ui_update_queue.push(UiEvent::ClearPreview);
@@ -80,11 +78,36 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             };
         }
 
-
-        if let Ok(cmd) = insim_receiver.try_recv() {
+        // Check received insim events.
+        if let Ok(cmd) = insim_event_rx.try_recv() {
             match cmd {
-                InsimCommand::ToggleRecording => {
+                InsimEvent::IsInGame(is_in_game) => {
+                    if is_in_game {
+                        match ui_state {
+                            UiState::Stopped => {
+                                println!("Detected in-game state, starting STT.");
+                                ui_state = UiState::Idle;
+                                ui_update_queue.push(UiEvent::UpdatePreview(message.clone()));
+                                ui_update_queue.push(UiEvent::UpdateState(ui_state));
+                            },
+                            _ => { /* No state change */ }
+                        };
+                    } else {
+                        match ui_state {
+                            UiState::Stopped => { /* No state change */ }
+                            _ => {
+                                println!("Detected not in-game state, stopping STT.");
+                                ui_state = UiState::Stopped;
+                                ui_update_queue.push(UiEvent::RemoveAllBtns);
+                            }
+                        };
+                    }
+                },
+                InsimEvent::ToggleRecording => {
                     match ui_state {
+                        UiState::Stopped => {
+                            continue;
+                        },
                         UiState::Idle => {
                             println!("Started recording...");
                             ui_state = UiState::Recording;
@@ -102,7 +125,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         UiState::Processing => { continue; },
                     };
                 },
-                InsimCommand::AcceptMessage => {
+                InsimEvent::AcceptMessage => {
                     if message.is_empty() { continue; }
 
                     match ui_state {
@@ -120,7 +143,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     reqi: insim::identifiers::RequestId::from(1),
                                     msg: part.to_string(),
                                 };
-                                conn.write(insim::Packet::Msx(msg))?;
+                                let _ = insim_cmd_tx.send(insim::Packet::Msx(msg)).await;
                             }
 
                             ui_update_queue.push(UiEvent::ClearPreview);
@@ -130,10 +153,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         _ => { continue; }
                     };
                 },
-                InsimCommand::NextChannel => {
+                InsimEvent::NextChannel => {
                     todo!("Implement channel switching");
                 },
-                InsimCommand::PeviousChannel => {
+                InsimEvent::PeviousChannel => {
                     todo!("Implement channel switching");
                 },
             }

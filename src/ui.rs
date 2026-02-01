@@ -3,6 +3,7 @@ pub enum UiState {
     Idle,
     Recording,
     Processing,
+    Stopped,
 }
 
 #[derive(Debug)]
@@ -10,6 +11,7 @@ pub enum UiEvent {
     UpdatePreview(String),
     ClearPreview,
     UpdateState(UiState),
+    RemoveAllBtns,
 }
 
 pub const STATE_ID: u8 = 1;
@@ -21,20 +23,30 @@ pub const STATE_OFFSET_LEFT: u8 = 4;
 pub const PREVIEW_OFFSET_LEFT: u8 = STATE_OFFSET_LEFT + UI_SCALE;
 pub const PREVIEW_OFFEST_TOP: u8 = 185; // from 0 to 200
 
-pub fn dispatch_ui_events(
-    conn: &mut insim::net::blocking_impl::Framed,
+pub async fn dispatch_ui_events(
+    tx: tokio::sync::mpsc::Sender<insim::Packet>,
     events: &mut Vec<UiEvent>,
 ) {
     while let Some(event) = events.pop() {
         match event {
             UiEvent::UpdatePreview(message) => {
-                let _ = conn.write(insim::Packet::Btn(get_message_preview_btn(message)));
+                let _ = tx.send(insim::Packet::Btn(get_message_preview_btn(message))).await;
             },
             UiEvent::ClearPreview => {
-                let _ = conn.write(insim::Packet::Btn(get_message_preview_btn(String::from(""))));
+                let _ = tx.send(insim::Packet::Btn(get_message_preview_btn(String::from("")))).await;
             },
             UiEvent::UpdateState(state) => {
-                let _ = conn.write(insim::Packet::Btn(get_state_btn(state)));
+                let _ = tx.send(insim::Packet::Btn(get_state_btn(state))).await;
+            },
+            UiEvent::RemoveAllBtns => {
+                let _ = tx.send(insim::Packet::Bfn(insim::insim::Bfn{
+                    subt: insim::insim::BfnType::Clear,
+                    reqi: insim::identifiers::RequestId::from(1),
+                    clickid: insim::identifiers::ClickId::from(0),
+                    clickmax: 0,
+                    ucid: insim::identifiers::ConnectionId::LOCAL,
+                    inst: insim::insim::BtnInst::default(),
+                })).await;
             },
         };
     }
@@ -45,6 +57,7 @@ fn get_state_btn(state: UiState) -> insim::insim::Btn {
         UiState::Idle => "^2•",
         UiState::Recording => "^1•",
         UiState::Processing => "^3•",
+        UiState::Stopped => "",
     };
 
     insim::insim::Btn{

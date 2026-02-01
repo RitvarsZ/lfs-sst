@@ -11,3 +11,4 @@ rubato = "1.0.1"
 audioadapter-buffers = "2.0.0"
 hound = "3.5.1"
 insim = { git = "https://github.com/theangryangel/insim.rs.git", branch = "main" }
+tokio = { version = "1.49.0", features = ["full"] }
