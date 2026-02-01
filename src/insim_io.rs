@@ -24,7 +24,10 @@ pub fn init_message_io(
     mut command_rx: tokio::sync::mpsc::Receiver<insim::Packet>,
 ) {
     tokio::spawn(async move {
-        let mut conn = match insim::tcp(format!("{}:{}", INSIM_HOST, INSIM_PORT)).connect_async().await {
+        let mut conn = match insim::tcp(format!("{}:{}", INSIM_HOST, INSIM_PORT))
+            .isi_iname("lfs-stt".to_owned())
+            .isi_flag_local(true)
+            .connect_async().await {
             Ok(c) => c,
             Err(err) => {
                 println!("Failed to connect to INSIM: {}", err);
@@ -60,7 +63,9 @@ pub fn init_message_io(
                             }
                         },
                         Err(e) => {
-                            println!("Error reading from INSIM: {}", e);
+                            // Insim probably disconnected which means game closed.
+                            // If not, we are cooked here.
+                            panic!("Error reading from INSIM: {}", e);
                         },
 
                     }
