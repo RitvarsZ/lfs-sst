@@ -1,12 +1,8 @@
-use std::{sync::mpsc};
+use crate::{insim_io::InsimEvent, ui::{UiEvent, UiState, dispatch_ui_events}};
 
-use crate::{insim_io::{InsimEvent}, ui::{UiEvent, UiState, dispatch_ui_events}};
-
-mod audio_input;
 mod insim_io;
-mod resampler;
-mod stt;
 mod ui;
+mod audio;
 
 pub const DEBUG_AUDIO_RESAMPLING: bool = false;
 pub const USE_GPU: bool = true;
@@ -19,25 +15,11 @@ pub const MAX_MESSAGE_LEN: usize = 95;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // From input to resampler
-    // From resampler to stt
-    let (audio_tx, audio_rx) = mpsc::channel::<Vec<f32>>();
-    let (resampled_tx, resampled_rx) = mpsc::channel::<Vec<f32>>();
+    let (audio_pipeline, mut stt_rx) = audio::audio_pipeline::AudioPipeline::new().await?;
     let (insim_event_tx, mut insim_event_rx) = tokio::sync::mpsc::channel::<InsimEvent>(1);
     let (insim_cmd_tx, insim_cmd_rx) = tokio::sync::mpsc::channel::<insim::Packet>(1);
 
     insim_io::init_message_io(insim_event_tx, insim_cmd_rx);
-
-    let mut audio_capture = audio_input::AudioStreamContext::new(audio_tx)?;
-    resampler::init_resampler(
-        audio_rx,
-        resampled_tx,
-        audio_capture.sample_rate,
-        audio_capture.input_channels
-    );
-    let stt_ctx = stt::SttContext::new();
-    stt::start_stt_worker(&stt_ctx, resampled_rx);
-
     let mut ui_state: UiState = UiState::Stopped;
     let mut message = String::from("");
     let mut message_timeout: Option<std::time::Instant> = None;
@@ -56,13 +38,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         // Check if there are any messages from the STT thread.
-        if let Ok(msg) = stt_ctx.log_rx.try_recv() {
+        if let Ok(msg) = stt_rx.try_recv() {
             match msg.msg_type {
-                stt::SttThreadMessageType::Log |
-                stt::SttThreadMessageType::TranscriptionError => {
+                audio::speech_to_text::SttMessageType::Log |
+                audio::speech_to_text::SttMessageType::TranscriptionError => {
                     println!("{}", msg);
                 },
-                stt::SttThreadMessageType::TranscriptionResult => {
+                audio::speech_to_text::SttMessageType::TranscriptionResult => {
                     println!("{}", msg);
                     message = msg.content;
                     ui_state = UiState::Idle;
@@ -76,13 +58,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         println!("Error setting message preview timeout");
                     }
                 },
-                stt::SttThreadMessageType::RecordingTimeoutReached => {
-                    println!("{}", msg);
-                    ui_state = UiState::Processing;
-                    ui_update_queue.push(UiEvent::UpdateState(ui_state));
-                    audio_capture.pause_stream()?;
-                    *stt_ctx.is_recording.lock().unwrap() = false;
-                }
             };
         }
 
@@ -120,15 +95,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             println!("Started recording...");
                             ui_state = UiState::Recording;
                             ui_update_queue.push(UiEvent::UpdateState(ui_state));
-                            audio_capture.start_stream()?;
-                            *stt_ctx.is_recording.lock().unwrap() = true;
+                            audio_pipeline.start_recording().await;
                         },
                         UiState::Recording => {
                             println!("Stopped recording...");
                             ui_state = UiState::Processing;
                             ui_update_queue.push(UiEvent::UpdateState(ui_state));
-                            audio_capture.pause_stream()?;
-                            *stt_ctx.is_recording.lock().unwrap() = false;
+                            audio_pipeline.stop_recording_and_transcribe().await;
                         },
                         UiState::Processing => { continue; },
                     };
