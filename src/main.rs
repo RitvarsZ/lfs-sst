@@ -1,5 +1,3 @@
-use crate::{ui::{UiContext, UiEvent}};
-
 mod insim_io;
 mod ui;
 mod audio;
@@ -17,22 +15,14 @@ pub const MAX_MESSAGE_LEN: usize = 95;
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (mut audio_pipeline, mut stt_rx) = audio::audio_pipeline::AudioPipeline::new().await?;
     let (insim, mut insim_rx, _insim_handle) = insim_io::init_insim().await?;
-    let mut ui_context = UiContext::default();
+    let mut ui_context = crate::ui::UiContext::default();
 
     loop {
         ui_context.dispatch_ui_events(insim.clone()).await;
 
         tokio::select! {
-            // Check if message need to be cleared after timeout.
-            _ = async {
-                if let Some(t) = &mut ui_context.message_timeout {
-                    t.await;
-                }
-            }, if ui_context.message_timeout.is_some() => {
-                ui_context.update_queue.push(UiEvent::ClearPreview);
-                ui_context.message.clear();
-                ui_context.message_timeout = None;
-            }
+            // Wait for message timeout to clear the preview.
+            _ = ui_context.clear_message_timeout() => {}
 
             // Check if there are any messages from the STT thread.
             Some(msg) = stt_rx.recv() => {

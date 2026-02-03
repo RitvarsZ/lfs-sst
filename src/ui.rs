@@ -31,10 +31,10 @@ pub const PREVIEW_OFFSET_LEFT: u8 = STATE_OFFSET_LEFT + UI_SCALE;
 pub const PREVIEW_OFFEST_TOP: u8 = 170; // from 0 to 200
 
 pub struct UiContext {
-    pub state: UiState,
-    pub message: String,
-    pub message_timeout: Option<Pin<Box<Sleep>>>,
-    pub update_queue: Vec<UiEvent>,
+    message_timeout: Option<Pin<Box<Sleep>>>,
+    state: UiState,
+    message: String,
+    update_queue: Vec<UiEvent>,
 }
 
 impl Default for UiContext {
@@ -49,6 +49,15 @@ impl Default for UiContext {
 }
 
 impl UiContext {
+    pub async fn clear_message_timeout(&mut self) {
+        if let Some(t) = &mut self.message_timeout {
+            t.as_mut().await;
+            self.update_queue.push(UiEvent::ClearPreview);
+            self.message.clear();
+            self.message_timeout = None;
+        }
+    }
+
     pub async fn dispatch_ui_events(&mut self, insim: InsimTask) {
         if !self.update_queue.is_empty() {
             println!("Dispatching {} UI events", self.update_queue.len());
