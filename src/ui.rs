@@ -1,29 +1,14 @@
 use std::pin::Pin;
-
 use insim::builder::InsimTask;
 use tokio::time::Sleep;
 use tracing::{debug, error, info};
 
-use crate::{MAX_MESSAGE_LEN, MESSAGE_PREVIEW_TIMEOUT_SECS, audio::{audio_pipeline::{AudioPipeline}, speech_to_text::{SttMessage, SttMessageType}}, insim_io::InsimEvent};
+use crate::{audio::{audio_pipeline::AudioPipeline, speech_to_text::{SttMessage, SttMessageType}}, config::ChatChannel, global::CONFIG, insim_io::InsimEvent};
 
+const MAX_MESSAGE_LEN: usize = 95;
 const STATE_ID: u8 = 1;
 const PREVIEW_ID: u8 = 2;
 const CHANNEL_ID: u8 = 3;
-const UI_SCALE: u8 = 5;
-pub const UI_OFFSET_TOP: u8 = 170;
-pub const UI_OFFSET_LEFT: u8 = 10;
-
-#[derive(Clone, Debug)]
-pub struct ChatChannel {
-    pub display: String,
-    pub prefix: String,
-}
-
-impl PartialEq for ChatChannel {
-    fn eq(&self, other: &Self) -> bool {
-        self.prefix == other.prefix
-    }
-}
 
 #[derive(Debug, Clone, Copy)]
 pub enum UiState {
@@ -53,18 +38,13 @@ pub struct UiContext {
 
 impl Default for UiContext {
     fn default() -> Self {
-        let chat_channels = vec![
-            ChatChannel{display: "/say".to_string(), prefix: "".to_string()},
-            ChatChannel{display: "^5!local".to_string(), prefix: "!l".to_string()},
-        ];
-
         UiContext {
             state: UiState::Stopped,
             message: String::from(""),
             message_timeout: None,
             update_queue: vec![],
-            active_channel: chat_channels[0].clone(),
-            chat_channels,
+            active_channel: CONFIG.chat_channels[0].clone(),
+            chat_channels: CONFIG.chat_channels.clone(),
         }
     }
 }
@@ -135,7 +115,7 @@ impl UiContext {
                 self.update_queue.push(UiEvent::UpdateState(self.state));
                 self.update_queue.push(UiEvent::UpdatePreview(self.message.clone()));
                 self.message_timeout = Some(Box::pin(
-                    tokio::time::sleep(std::time::Duration::from_secs(MESSAGE_PREVIEW_TIMEOUT_SECS))
+                    tokio::time::sleep(std::time::Duration::from_secs(CONFIG.message_preview_timeout_secs))
                 ));
             },
         };
@@ -245,10 +225,10 @@ fn get_state_btn(state: UiState) -> insim::insim::Btn {
 
     insim::insim::Btn{
         text: insim::core::string::escaping::escape(text).to_string(),
-        t: UI_OFFSET_TOP,
-        w: UI_SCALE,
-        h: UI_SCALE,
-        l: UI_OFFSET_LEFT,
+        t: CONFIG.ui_offset_top,
+        w: CONFIG.ui_scale,
+        h: CONFIG.ui_scale,
+        l: CONFIG.ui_offset_left,
         reqi: insim::identifiers::RequestId::from(1),
         ucid: insim::identifiers::ConnectionId::LOCAL,
         clickid: insim::identifiers::ClickId::from(STATE_ID),
@@ -272,10 +252,10 @@ fn get_message_preview_btn(message: String) -> insim::insim::Btn {
     let text = insim::core::string::escaping::escape(format!("^3{}", message).as_str()).to_string();
     insim::insim::Btn{
         text,
-        t: UI_OFFSET_TOP,
+        t: CONFIG.ui_offset_top,
         w: msg_to_btn_width(message.clone()),
-        h: UI_SCALE,
-        l: UI_OFFSET_LEFT + UI_SCALE, // next to state
+        h: CONFIG.ui_scale,
+        l: CONFIG.ui_offset_left + CONFIG.ui_scale, // next to state
         reqi: insim::identifiers::RequestId::from(1),
         ucid: insim::identifiers::ConnectionId::LOCAL,
         clickid: insim::identifiers::ClickId::from(PREVIEW_ID),
@@ -292,9 +272,9 @@ fn get_channel_btn(channel: ChatChannel) -> insim::insim::Btn {
 
     insim::insim::Btn{
         text,
-        t: UI_OFFSET_TOP + UI_SCALE,
-        l: UI_OFFSET_LEFT,
-        h: UI_SCALE,
+        t: CONFIG.ui_offset_top + CONFIG.ui_scale,
+        l: CONFIG.ui_offset_left,
+        h: CONFIG.ui_scale,
         w: msg_to_btn_width(channel.display.to_string()),
         reqi: insim::identifiers::RequestId::from(1),
         ucid: insim::identifiers::ConnectionId::LOCAL,

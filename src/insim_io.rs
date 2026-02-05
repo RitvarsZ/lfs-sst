@@ -2,7 +2,7 @@ use insim::builder::InsimTask;
 use tokio::{sync::mpsc::Receiver, task::JoinHandle};
 use tracing::{error, info};
 
-use crate::{INSIM_HOST, INSIM_PORT};
+use crate::global::CONFIG;
 
 #[allow(dead_code)]
 pub enum InsimEvent {
@@ -26,9 +26,9 @@ impl InsimEvent {
 }
 
 pub async fn init_insim() -> Result<(InsimTask, Receiver<InsimEvent>, JoinHandle<insim::Result<()>>), Box<dyn std::error::Error>> {
-    info!("Connecting to INSIM at {}:{}", INSIM_HOST, INSIM_PORT);
+    info!("Connecting to INSIM at {}:{}", CONFIG.insim_host, CONFIG.insim_port);
     let (event_tx, event_rx) = tokio::sync::mpsc::channel(100);
-    let (insim, handle) = match insim::tcp(format!("{}:{}", INSIM_HOST, INSIM_PORT))
+    let (insim, handle) = match insim::tcp(format!("{}:{}", CONFIG.insim_host, CONFIG.insim_port))
         .isi_iname("lfs-stt".to_owned())
         .isi_flag_local(true)
         .spawn(1).await {

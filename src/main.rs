@@ -1,27 +1,20 @@
 use futures::FutureExt;
-use tracing::{info};
+use tracing::{info, level_filters::LevelFilter};
 use tracing_subscriber::FmtSubscriber;
 
-use crate::ui::UiContext;
+use crate::{global::CONFIG, ui::UiContext};
 
 mod insim_io;
 mod ui;
 mod audio;
-
-pub const DEBUG_AUDIO_RESAMPLING: bool = false;
-pub const USE_GPU: bool = true;
-pub const MODEL_PATH: &str = "models/small.en.bin";
-pub const INSIM_HOST: &str = "127.0.0.1";
-pub const INSIM_PORT: &str = "29999";
-pub const MESSAGE_PREVIEW_TIMEOUT_SECS: u64 = 20;
-pub const RECORDING_TIMEOUT_SECS: u8 = 10;
-pub const MAX_MESSAGE_LEN: usize = 95;
+mod config;
+mod global;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let subscriber = FmtSubscriber::builder()
-    .with_max_level(tracing::Level::DEBUG)
-    .finish();
+        .with_max_level(LevelFilter::from(CONFIG.debug_log_level))
+        .finish();
     tracing::subscriber::set_global_default(subscriber)
         .expect("setting default subscriber failed");
 

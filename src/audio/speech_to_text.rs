@@ -1,9 +1,7 @@
 use std::fmt::Display;
-
 use tokio::{sync::mpsc::{self, Receiver}, task::JoinHandle};
 use whisper_rs::{FullParams, WhisperContext, WhisperContextParameters};
-
-use crate::{DEBUG_AUDIO_RESAMPLING, MODEL_PATH, USE_GPU};
+use crate::global::CONFIG;
 
 pub enum SttMessageType {
     Log,
@@ -39,8 +37,8 @@ pub async fn init(
 
     let handle = tokio::spawn(async move {
         let mut params = WhisperContextParameters::new();
-        params.use_gpu(USE_GPU);
-        let whisper_ctx = WhisperContext::new_with_params(MODEL_PATH, params)
+        params.use_gpu(CONFIG.use_gpu);
+        let whisper_ctx = WhisperContext::new_with_params(CONFIG.model_path.as_str(), params)
                 .expect("Failed to create Whisper context");
         let mut whisper_state = whisper_ctx.create_state().unwrap();
         let mut full_params = FullParams::new(whisper_rs::SamplingStrategy::Greedy { best_of: 8 });
@@ -99,7 +97,7 @@ pub async fn init(
 }
 
 fn maybe_dump_buffer_to_wav(samples: &[f32]) -> Result<(), Box<dyn std::error::Error>> {
-    if !DEBUG_AUDIO_RESAMPLING { return Ok(()); }
+    if !CONFIG.debug_audio_resampling { return Ok(()); }
 
     let spec = hound::WavSpec {
         channels: 1,

@@ -1,0 +1,105 @@
+# ================================
+# In order to interact with the plugin, set up binds in game:
+#
+# "/o stt talk"     - toggles recording on/off
+#
+# "/o stt accept"   - accepts the message in preview and sends it to the server
+#                     on the selected channel
+#
+# "/o stt nc"       - selects the next chat channel (cycles back to the first
+#                     channel after the last one)
+#
+# "/o stt pc"       - selects the previous chat channel
+# ================================
+
+
+
+# ================================
+# InSim connection settings
+# ================================
+
+# Insim host
+insim_host = "127.0.0.1"
+
+# Insim port
+insim_port = "29999"
+
+
+
+# ================================
+# Model / AI settings
+# ================================
+
+# Path to the wihsper model directory or file
+# Download a model from https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.en.bin
+model_path = "models/small.en.bin"
+
+# Whether to use GPU acceleration to run the speech to text model
+# Requires Nvidia GPU and CUDA installed
+use_gpu = false
+
+
+
+# ================================
+# Timing settings
+# ================================
+
+# How long message previews stay visible
+# Once cleared, the message can no longer be sent
+message_preview_timeout_secs = 20
+
+# Maximum message recording duration
+recording_timeout_secs = 10
+
+
+
+# ================================
+# UI layout settings
+# ================================
+
+# UI scale factor
+ui_scale = 5
+
+# Vertical UI offset (0–200)
+ui_offset_top = 170
+
+# Horizontal UI offset (0–200)
+ui_offset_left = 10
+
+# Button ID offset (0–230)
+# Use if buttons are conflicting with other insim plugins
+btn_id_offset = 50
+
+
+
+# ================================
+# Advanced settings
+# ================================
+
+# When true, last recorded message is saved to debug.wav
+debug_audio_resampling = false
+
+# Logging verbosity
+# Valid values: error, warn, info, debug, trace
+debug_log_level = "info"
+
+
+
+# ================================
+# Chat channels
+# ================================
+# You must define at least ONE chat channel.
+# Each channel needs a non-empty display name.
+# Add as many channels as you want.
+
+[[chat_channels]]
+# What you see in the UI
+display = "/say"
+
+# Message prefix sent to insim
+prefix = ""
+
+[[chat_channels]]
+display = "^5!local"
+prefix = "!l"
+

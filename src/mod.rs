@@ -4,3 +4,5 @@ pub mod resampler;
 pub mod stt;
 pub mod ui;
 pub mod audio;
+pub mod config;
+pub mod global;

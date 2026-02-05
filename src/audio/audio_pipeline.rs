@@ -2,7 +2,7 @@ use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 use cpal::Stream;
 use tokio::{sync::{mpsc::{self, Receiver}}, task::JoinHandle};
 use tracing::{debug, error, info};
-use crate::{RECORDING_TIMEOUT_SECS, audio::{self, speech_to_text::SttMessage}};
+use crate::{audio::{self, speech_to_text::SttMessage}, global::CONFIG};
 
 pub enum CaptureMsg {
     Audio(Vec<f32>),
@@ -68,7 +68,7 @@ async fn init_audio_capture(
     is_recording: Arc<AtomicBool>,
 ) -> Result<JoinHandle<()>, Box<dyn std::error::Error>> {
     let handle = tokio::spawn(async move {
-        let mut buffer = Vec::<f32>::with_capacity(16_000 * RECORDING_TIMEOUT_SECS as usize);
+        let mut buffer = Vec::<f32>::with_capacity(16_000 * CONFIG.recording_timeout_secs as usize);
 
         debug!("Audio capture task started, waiting for audio data...");
         loop {
@@ -88,7 +88,7 @@ async fn init_audio_capture(
                     },
                     CaptureMsg::Audio(data) => {
                         buffer.extend_from_slice(&data);
-                        if buffer.len() >= 16_000 * RECORDING_TIMEOUT_SECS as usize {
+                        if buffer.len() >= 16_000 * CONFIG.recording_timeout_secs as usize {
                             debug!("Buffer reached timeout size, sending to STT");
                             is_recording.store(false, Ordering::Relaxed);
                             if tx.send(buffer.clone()).await.is_err() {
