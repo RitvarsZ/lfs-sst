@@ -123,9 +123,6 @@ prefix = "!l"
 ## Usage
 
 1. Download the latest [release](https://github.com/RitvarsZ/lfs-stt/releases)
-2. Download the whisper model from `https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.en.bin`
-    - you can also experiment with `ggml-tiny.en.bin` or `ggml-medium.en.bin`.
-    - place the model in `/models`. Make sure your path-to-model matches with the one in the config.
 2. Configure InSim binds in LFS as described above.
 3. Launch LFS and launch `lfs-stt.exe`.
 4. Press your `talk` bind to start recording, press it again to stop. Press `accept` to send the transcribed result.
@@ -145,6 +142,7 @@ prefix = "!l"
 ## Contributing
 
 * PRs and bug reports welcome.
+* Disclaimer - I'm using this project as an opportunity to learn Rust.
 
 ---
 
